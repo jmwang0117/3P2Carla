@@ -1,0 +1,116 @@
+FROM nvidia/cudagl:11.4.2-devel-ubuntu18.04
+
+ARG CARLA_VERSION=0.9.11
+ARG GID=1000
+ARG UID=1000
+ENV NVIDIA_VISIBLE_DEVICES ${NVIDIA_VISIBLE_DEVICES:-all}
+ENV NVIDIA_DRIVER_CAPABILITIES ${NVIDIA_DRIVER_CAPABILITIES:+$NVIDIA_DRIVER_CAPABILITIES,}graphics
+
+
+# add new sudo user
+ENV USERNAME jmwang
+ENV PASSWORD wjm
+ENV HOME /home/$USERNAME
+RUN groupadd -f -g ${GID} ${USERNAME}
+RUN useradd -m $USERNAME -u ${UID} -g ${GID} && \
+    echo "$USERNAME:$PASSWORD" | chpasswd && \
+    usermod --shell /bin/bash $USERNAME && \
+    usermod -aG sudo $USERNAME && \
+    mkdir /etc/sudoers.d && \
+    echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/$USERNAME && \
+    chmod 0440 /etc/sudoers.d/$USERNAME
+
+
+ENV DEBIAN_FRONTEND noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo \
+    less \
+    emacs \
+    tmux \
+    bash-completion \
+    command-not-found \
+    software-properties-common \
+    xsel \
+    xdg-user-dirs \
+    python-pip \
+    python-protobuf \
+    python-pexpect \
+    pcl-tools \
+    libomp5 \
+    vulkan-utils \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Vulkan
+RUN mkdir -p /etc/vulkan/icd.d && \
+    echo '{ "file_format_version" : "1.0.0", "ICD" : { "library_path" : "libGLX_nvidia.so.0", "api_version" : "1.1.99" } }' > /etc/vulkan/icd.d/nvidia_icd.json
+RUN echo > /etc/ld.so.preload
+
+# ROS Melodic
+RUN apt-get update
+RUN sh -c 'echo "deb http://packages.ros.org/ros/ubuntu $(lsb_release -sc) main" > /etc/apt/sources.list.d/ros-latest.list'
+RUN apt install -y curl
+RUN curl -s https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | sudo apt-key add -
+
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-melodic-desktop-full \
+    python-rosdep \
+    python-rosinstall \
+    python-rosinstall-generator \
+    python-wstool \
+    build-essential \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# CARLA Simulator
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 1AF1527DE64CB8D9
+RUN add-apt-repository "deb [arch=amd64] http://dist.carla.org/carla $(lsb_release -sc) main"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    carla-simulator=${CARLA_VERSION} \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# addtional ROS package
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-melodic-derived-object-msgs \
+    ros-melodic-ackermann-msgs \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# addtional python package
+RUN pip install \
+    transforms3d==0.3.1 \
+    networkx==2.2 \
+    pygame==1.9.6
+
+RUN rosdep init
+
+USER $USERNAME
+WORKDIR /home/$USERNAME
+RUN rosdep update
+
+SHELL ["/bin/bash", "-c"]
+
+# build CARLA ROS bridge
+RUN mkdir -p ~/catkin_ws/src && \
+    source /opt/ros/melodic/setup.bash && \
+    catkin_init_workspace ~/catkin_ws/src && \
+    cd ~/catkin_ws/src && \
+    git clone --recursive https://github.com/carla-simulator/ros-bridge.git -b ${CARLA_VERSION} && \
+    cd ~/catkin_ws && \
+    catkin_make -DCMAKE_BUILD_TYPE=Release && \
+    source ~/catkin_ws/devel/setup.bash
+
+# build CARLA ScenarioRunner
+RUN cd /home/$USERNAME && \
+    git clone https://github.com/carla-simulator/scenario_runner.git -b v${CARLA_VERSION} && \
+    sudo pip install -r scenario_runner/requirements.txt
+
+RUN echo "source /opt/ros/melodic/setup.bash" >> ~/.bashrc && \
+    echo "source ~/catkin_ws/devel/setup.bash" >> ~/.bashrc && \
+    echo "export SCENARIO_RUNNER_PATH=/home/$USERNAME/scenario_runner" >> ~/.bashrc
