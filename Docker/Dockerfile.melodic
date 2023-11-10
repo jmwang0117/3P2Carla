@@ -114,3 +114,35 @@ RUN cd /home/$USERNAME && \
 RUN echo "source /opt/ros/melodic/setup.bash" >> ~/.bashrc && \
     echo "source ~/catkin_ws/devel/setup.bash" >> ~/.bashrc && \
     echo "export SCENARIO_RUNNER_PATH=/home/$USERNAME/scenario_runner" >> ~/.bashrc
+
+# Install Ubuntu desktop and VNC server
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ubuntu-desktop \
+    x11vnc \
+    && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set up VNC server
+RUN mkdir ~/.vnc && \
+    x11vnc -storepasswd $PASSWORD ~/.vnc/passwd
+
+# Set up the VNC server to run as a daemon
+RUN echo '#!/bin/bash\n\
+Xvfb :99 -screen 0 1024x768x16 &\n\
+sleep 5\n\
+startxfce4 &\n\
+x11vnc -display :99 -usepw -forever -shared' > /usr/local/bin/start-vnc-server.sh && \
+    chmod +x /usr/local/bin/start-vnc-server.sh
+
+# Expose VNC port
+EXPOSE 5900
+
+# Set display environment variable
+ENV DISPLAY :99
+
+# Switch back to user
+USER $USERNAME
+
+# Make sure the script is executed when the container starts
+CMD ["/usr/local/bin/start-vnc-server.sh"]
