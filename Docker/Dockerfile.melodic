@@ -75,11 +75,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# addtional python package
-#RUN pip3 install \
-#    transforms3d==0.3.1 \
-#    networkx==2.2 \
-#    pygame==1.9.6
+
 
 RUN rosdep init
 
